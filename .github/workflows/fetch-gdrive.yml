@@ -1,0 +1,53 @@
+# 用 GitHub Actions 中转下载 Google Drive 文件
+#
+# 为什么需要它：本机到 Google 全域名不通。实测 drive.google.com、
+# www.googleapis.com、drive.usercontent.google.com 三个端点均 TCP 超时；
+# 用 DoH 解析得到 209.95.56.60（非 Google 网段，是污染值），
+# 换成真实 IP 172.217.114.4 直连仍然超时 —— 是 IP 层封锁。
+# 因此 gdown / rclone / AccessToken 全部无效，必须换一台能出境的机器。
+# GitHub Actions 的 runner 在 Azure 上，可正常访问 Google Drive。
+#
+# 放置位置（目录和文件名都不能改）：
+#   <仓库根目录>/.github/workflows/fetch-gdrive.yml
+#
+# 触发：仓库 Actions 页 → 左侧选 fetch-gdrive → Run workflow
+
+name: fetch-gdrive
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_id:
+        description: 'Google Drive 文件 ID（分享链接里 /d/ 与 /view 之间的那串）'
+        required: true
+        default: '1Cru_rHDKKymYid0zKAG6sqbo2jiGKBIs'
+      out_name:
+        description: '落地文件名'
+        required: true
+        default: 'graph_large.pkl'
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 确认 runner 能访问 Google
+        run: |
+          curl -s --max-time 10 https://drive.google.com/ -o /dev/null -w "drive.google.com -> %{http_code}\n" || true
+
+      - name: 安装 gdown
+        run: pip install -q gdown
+
+      - name: 从 Google Drive 下载
+        run: |
+          gdown "${{ inputs.file_id }}" -O "${{ inputs.out_name }}"
+          echo "---"
+          ls -lh "${{ inputs.out_name }}"
+          sha256sum "${{ inputs.out_name }}"
+
+      - name: 上传为 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lmnav-data
+          path: ${{ inputs.out_name }}
+          retention-days: 7
+          if-no-files-found: error
